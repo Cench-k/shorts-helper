@@ -78,13 +78,11 @@ export type Transcript = {
 
 export type STTProvider = "groq" | "openai";
 export type LLMProvider = "gemini" | "anthropic";
-export type TranscribeMode = "stt" | "video";
 
 export async function transcribe(args: {
   url?: string;
   fileId?: string;
-  mode: TranscribeMode;
-  provider: string;
+  provider: STTProvider;
   apiKey?: string;
   language?: string;
 }): Promise<Transcript> {
@@ -94,7 +92,6 @@ export async function transcribe(args: {
     body: JSON.stringify({
       url: args.url,
       file_id: args.fileId,
-      mode: args.mode,
       provider: args.provider,
       language: args.language,
       api_key: args.apiKey,
@@ -103,6 +100,27 @@ export async function transcribe(args: {
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(detail.detail || "트랜스크립트 실패");
+  }
+  return res.json();
+}
+
+export async function generateNarrationScript(args: {
+  url?: string;
+  fileId?: string;
+  apiKey: string;
+}): Promise<{ script: string }> {
+  const res = await fetch(`${API_BASE}/api/narration/script`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      url: args.url,
+      file_id: args.fileId,
+      api_key: args.apiKey,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(detail.detail || "나레이션 대본 생성 실패");
   }
   return res.json();
 }

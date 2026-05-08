@@ -9,6 +9,7 @@ import {
   fetchCriteria,
   fetchYouTubeMeta,
   fileUrl,
+  generateNarrationScript,
   getJob,
   selectHighlights,
   startRender,
@@ -24,7 +25,7 @@ import {
   type UploadMeta,
   type YouTubeMeta,
 } from "@/lib/api";
-import { getKey, type ApiKeys } from "@/lib/keys";
+import { getKey } from "@/lib/keys";
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -141,6 +142,9 @@ function NewInner() {
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  const [narrationScript, setNarrationScript] = useState<string | null>(null);
+  const [generatingScript, setGeneratingScript] = useState(false);
+
   const [cropMode, setCropMode] = useState<CropMode>("9:16-center");
   const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [removeSilence, setRemoveSilence] = useState(false);
@@ -254,14 +258,10 @@ function NewInner() {
 
   async function onTranscribe() {
     if (!meta) return;
-    const mode: "stt" | "video" = hasNarration ? "stt" : "video";
-    const usedProvider = mode === "video" ? "gemini" : provider;
-    const keyName: keyof ApiKeys =
-      mode === "video" ? "gemini" : (provider as "groq" | "openai");
-    const apiKey = getKey(keyName);
+    const apiKey = getKey(provider);
     if (!apiKey) {
       setError(
-        `${keyName} API 키가 없습니다. 우측 상단 "설정"에서 키를 입력하세요.`,
+        `${provider} API 키가 없습니다. 우측 상단 "설정"에서 키를 입력하세요.`,
       );
       return;
     }
@@ -273,8 +273,7 @@ function NewInner() {
       const t = await transcribe({
         url: fileId ? undefined : url.trim(),
         fileId: fileId ?? undefined,
-        mode,
-        provider: usedProvider,
+        provider,
         apiKey,
       });
       setTranscript(t);
@@ -283,6 +282,42 @@ function NewInner() {
     } finally {
       setTranscribing(false);
     }
+  }
+
+  async function onGenerateNarrationScript() {
+    if (!meta) return;
+    const apiKey = getKey("gemini");
+    if (!apiKey) {
+      setError('Gemini API 키가 없습니다. 우측 상단 "설정"에서 키를 입력하세요.');
+      return;
+    }
+    setGeneratingScript(true);
+    setError(null);
+    setNarrationScript(null);
+    try {
+      const { script } = await generateNarrationScript({
+        url: fileId ? undefined : url.trim(),
+        fileId: fileId ?? undefined,
+        apiKey,
+      });
+      setNarrationScript(script);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "나레이션 대본 생성 실패");
+    } finally {
+      setGeneratingScript(false);
+    }
+  }
+
+  function downloadScript() {
+    if (!narrationScript) return;
+    const blob = new Blob([narrationScript], { type: "text/plain;charset=utf-8" });
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const safeTitle = (meta?.title || "narration").replace(/[^\w가-힣\s-]/g, "").trim() || "narration";
+    a.href = u;
+    a.download = `${safeTitle}_나레이션.txt`;
+    a.click();
+    URL.revokeObjectURL(u);
   }
 
   async function onSelectHighlights() {
@@ -567,62 +602,114 @@ function NewInner() {
                 <input
                   type="radio"
                   checked={hasNarration}
-                  onChange={() => setHasNarration(true)}
-                  disabled={transcribing}
+                  onChange={() => {
+                    setHasNarration(true);
+                    setNarrationScript(null);
+                  }}
+                  disabled={transcribing || generatingScript}
                 />
-                있음 (Whisper로 받아쓰기)
+                있음 (Whisper로 받아쓰기 → 쇼츠 만들기)
               </label>
               <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <input
                   type="radio"
                   checked={!hasNarration}
-                  onChange={() => setHasNarration(false)}
-                  disabled={transcribing}
+                  onChange={() => {
+                    setHasNarration(false);
+                    setTranscript(null);
+                    setHighlights(null);
+                  }}
+                  disabled={transcribing || generatingScript}
                 />
-                없음 (Gemini가 영상 보고 나레이션 제안)
+                없음 (Gemini가 영상 보고 나레이션 대본 작성)
               </label>
             </div>
 
-            {hasNarration && (
-              <div style={{ marginBottom: 8 }}>
-                <label
-                  className="muted"
-                  style={{ fontSize: 12, display: "block", marginBottom: 4 }}
-                >
-                  STT 프로바이더
-                </label>
-                <select
-                  className="input"
-                  style={{ width: 240 }}
-                  value={provider}
-                  onChange={(e) => setProvider(e.target.value as STTProvider)}
+            {hasNarration ? (
+              <>
+                <div style={{ marginBottom: 8 }}>
+                  <label
+                    className="muted"
+                    style={{ fontSize: 12, display: "block", marginBottom: 4 }}
+                  >
+                    STT 프로바이더
+                  </label>
+                  <select
+                    className="input"
+                    style={{ width: 240 }}
+                    value={provider}
+                    onChange={(e) => setProvider(e.target.value as STTProvider)}
+                    disabled={transcribing}
+                  >
+                    <option value="groq">Groq Whisper (무료, 빠름)</option>
+                    <option value="openai">OpenAI Whisper (유료)</option>
+                  </select>
+                </div>
+                <button
+                  className="btn"
+                  onClick={onTranscribe}
                   disabled={transcribing}
                 >
-                  <option value="groq">Groq Whisper (무료, 빠름)</option>
-                  <option value="openai">OpenAI Whisper (유료)</option>
-                </select>
-              </div>
+                  {transcribing ? "트랜스크립트 생성 중..." : "트랜스크립트 생성"}
+                </button>
+                <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                  영상 길이에 따라 30초~수 분 소요.
+                </p>
+              </>
+            ) : (
+              <>
+                <button
+                  className="btn"
+                  onClick={onGenerateNarrationScript}
+                  disabled={generatingScript}
+                >
+                  {generatingScript ? "Gemini 분석 중..." : "나레이션 대본 받기"}
+                </button>
+                <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                  Gemini 2.5 Flash로 영상 시각 분석 후 한국어 나레이션 대본 작성.
+                  영상 다운로드 + 업로드로 1~3분 소요.
+                </p>
+              </>
             )}
-
-            <button
-              className="btn"
-              onClick={onTranscribe}
-              disabled={transcribing}
-            >
-              {transcribing
-                ? hasNarration
-                  ? "트랜스크립트 생성 중..."
-                  : "영상 분석 중..."
-                : hasNarration
-                  ? "트랜스크립트 생성"
-                  : "Gemini로 영상 분석"}
-            </button>
-            <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-              {hasNarration
-                ? "영상 길이에 따라 30초~수 분 소요."
-                : "Gemini 2.5 Flash로 영상 시각 분석. 영상 다운로드 + 업로드로 1~3분 소요."}
-            </p>
           </div>
+        </div>
+      )}
+
+      {narrationScript && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 12,
+            }}
+          >
+            <h3 style={{ fontSize: 16, fontWeight: 600 }}>📜 나레이션 대본</h3>
+            <button className="btn" onClick={downloadScript}>
+              .txt 다운로드
+            </button>
+          </div>
+          <pre
+            style={{
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              padding: 16,
+              fontSize: 14,
+              lineHeight: 1.7,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              fontFamily: "inherit",
+              maxHeight: 500,
+              overflowY: "auto",
+            }}
+          >
+            {narrationScript}
+          </pre>
+          <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+            이 대본을 본인 목소리로 녹음해 영상에 입히면 됩니다.
+          </p>
         </div>
       )}
 
