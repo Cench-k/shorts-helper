@@ -78,11 +78,13 @@ export type Transcript = {
 
 export type STTProvider = "groq" | "openai";
 export type LLMProvider = "gemini" | "anthropic";
+export type TranscribeMode = "stt" | "video";
 
 export async function transcribe(args: {
   url?: string;
   fileId?: string;
-  provider: STTProvider;
+  mode: TranscribeMode;
+  provider: string;
   apiKey?: string;
   language?: string;
 }): Promise<Transcript> {
@@ -92,6 +94,7 @@ export async function transcribe(args: {
     body: JSON.stringify({
       url: args.url,
       file_id: args.fileId,
+      mode: args.mode,
       provider: args.provider,
       language: args.language,
       api_key: args.apiKey,
@@ -159,6 +162,8 @@ export async function startRender(args: {
   transcript: Transcript | null;
   cropMode: CropMode;
   burnSubtitles: boolean;
+  removeSilence: boolean;
+  emphasizeHook: boolean;
 }): Promise<{ job_id: string }> {
   const res = await fetch(`${API_BASE}/api/render`, {
     method: "POST",
@@ -170,6 +175,8 @@ export async function startRender(args: {
       transcript: args.transcript,
       crop_mode: args.cropMode,
       burn_subtitles: args.burnSubtitles,
+      remove_silence: args.removeSilence,
+      emphasize_hook: args.emphasizeHook,
     }),
   });
   if (!res.ok) {

@@ -24,7 +24,7 @@ import {
   type UploadMeta,
   type YouTubeMeta,
 } from "@/lib/api";
-import { getKey } from "@/lib/keys";
+import { getKey, type ApiKeys } from "@/lib/keys";
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -136,12 +136,15 @@ function NewInner() {
   const [uploadMeta, setUploadMeta] = useState<UploadMeta | null>(null);
 
   const [provider, setProvider] = useState<STTProvider>("groq");
+  const [hasNarration, setHasNarration] = useState(true);
   const [transcribing, setTranscribing] = useState(false);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [cropMode, setCropMode] = useState<CropMode>("9:16-center");
   const [burnSubtitles, setBurnSubtitles] = useState(true);
+  const [removeSilence, setRemoveSilence] = useState(false);
+  const [emphasizeHook, setEmphasizeHook] = useState(true);
   const [renderJobId, setRenderJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
 
@@ -251,10 +254,14 @@ function NewInner() {
 
   async function onTranscribe() {
     if (!meta) return;
-    const apiKey = getKey(provider);
+    const mode: "stt" | "video" = hasNarration ? "stt" : "video";
+    const usedProvider = mode === "video" ? "gemini" : provider;
+    const keyName: keyof ApiKeys =
+      mode === "video" ? "gemini" : (provider as "groq" | "openai");
+    const apiKey = getKey(keyName);
     if (!apiKey) {
       setError(
-        `${provider} API 키가 없습니다. 우측 상단 "설정"에서 키를 입력하세요.`,
+        `${keyName} API 키가 없습니다. 우측 상단 "설정"에서 키를 입력하세요.`,
       );
       return;
     }
@@ -266,7 +273,8 @@ function NewInner() {
       const t = await transcribe({
         url: fileId ? undefined : url.trim(),
         fileId: fileId ?? undefined,
-        provider,
+        mode,
+        provider: usedProvider,
         apiKey,
       });
       setTranscript(t);
@@ -396,6 +404,8 @@ function NewInner() {
         transcript,
         cropMode,
         burnSubtitles,
+        removeSilence,
+        emphasizeHook,
       });
       setRenderJobId(job_id);
     } catch (e) {
@@ -550,29 +560,67 @@ function NewInner() {
                 fontWeight: 600,
               }}
             >
-              STT 프로바이더
+              영상에 나레이션이 있나요?
             </label>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <select
-                className="input"
-                style={{ width: 200 }}
-                value={provider}
-                onChange={(e) => setProvider(e.target.value as STTProvider)}
-                disabled={transcribing}
-              >
-                <option value="groq">Groq Whisper (무료, 빠름)</option>
-                <option value="openai">OpenAI Whisper (유료)</option>
-              </select>
-              <button
-                className="btn"
-                onClick={onTranscribe}
-                disabled={transcribing}
-              >
-                {transcribing ? "트랜스크립트 생성 중..." : "트랜스크립트 생성"}
-              </button>
+            <div style={{ display: "flex", gap: 12, marginBottom: 12, fontSize: 13 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="radio"
+                  checked={hasNarration}
+                  onChange={() => setHasNarration(true)}
+                  disabled={transcribing}
+                />
+                있음 (Whisper로 받아쓰기)
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="radio"
+                  checked={!hasNarration}
+                  onChange={() => setHasNarration(false)}
+                  disabled={transcribing}
+                />
+                없음 (Gemini가 영상 보고 나레이션 제안)
+              </label>
             </div>
+
+            {hasNarration && (
+              <div style={{ marginBottom: 8 }}>
+                <label
+                  className="muted"
+                  style={{ fontSize: 12, display: "block", marginBottom: 4 }}
+                >
+                  STT 프로바이더
+                </label>
+                <select
+                  className="input"
+                  style={{ width: 240 }}
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value as STTProvider)}
+                  disabled={transcribing}
+                >
+                  <option value="groq">Groq Whisper (무료, 빠름)</option>
+                  <option value="openai">OpenAI Whisper (유료)</option>
+                </select>
+              </div>
+            )}
+
+            <button
+              className="btn"
+              onClick={onTranscribe}
+              disabled={transcribing}
+            >
+              {transcribing
+                ? hasNarration
+                  ? "트랜스크립트 생성 중..."
+                  : "영상 분석 중..."
+                : hasNarration
+                  ? "트랜스크립트 생성"
+                  : "Gemini로 영상 분석"}
+            </button>
             <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-              영상 길이에 따라 30초~수 분 소요. 백엔드 .env에 해당 키가 있어야 합니다.
+              {hasNarration
+                ? "영상 길이에 따라 30초~수 분 소요."
+                : "Gemini 2.5 Flash로 영상 시각 분석. 영상 다운로드 + 업로드로 1~3분 소요."}
             </p>
           </div>
         </div>
@@ -1052,25 +1100,44 @@ function NewInner() {
             </div>
             <div>
               <label className="muted" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
-                자막
+                편집 옵션
               </label>
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  height: 38,
-                  fontSize: 13,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={burnSubtitles}
-                  onChange={(e) => setBurnSubtitles(e.target.checked)}
-                  disabled={jobStatus?.status === "processing"}
-                />
-                영상에 자막 합성 (트랜스크립트 기반)
-              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={burnSubtitles}
+                    onChange={(e) => setBurnSubtitles(e.target.checked)}
+                    disabled={jobStatus?.status === "processing"}
+                  />
+                  자막 합성
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={removeSilence}
+                    onChange={(e) => setRemoveSilence(e.target.checked)}
+                    disabled={jobStatus?.status === "processing"}
+                  />
+                  무음 구간 자동 제거 (점프컷)
+                </label>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    opacity: burnSubtitles ? 1 : 0.5,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={emphasizeHook}
+                    onChange={(e) => setEmphasizeHook(e.target.checked)}
+                    disabled={jobStatus?.status === "processing" || !burnSubtitles}
+                  />
+                  첫 3초 자막 강조 (훅)
+                </label>
+              </div>
             </div>
           </div>
 
