@@ -7,7 +7,6 @@ import { Suspense, useEffect, useState } from "react";
 import { SettingsModal } from "@/components/SettingsModal";
 import {
   fetchCriteria,
-  fetchYouTubeMeta,
   fileUrl,
   generateNarrationScript,
   getJob,
@@ -128,8 +127,6 @@ function NewInner() {
   const params = useSearchParams();
   const mode = params.get("mode") === "many-to-many" ? "many-to-many" : "one-to-many";
 
-  const [url, setUrl] = useState("");
-  const [metaLoading, setMetaLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<YouTubeMeta | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
@@ -206,29 +203,9 @@ function NewInner() {
     });
   }
 
-  async function onFetchMeta() {
-    if (!url.trim()) return;
-    setMetaLoading(true);
-    setError(null);
-    setMeta(null);
-    setFileId(null);
-    setUploadMeta(null);
-    setTranscript(null);
-    setHighlights(null);
-    try {
-      const m = await fetchYouTubeMeta(url.trim());
-      setMeta(m);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "조회 실패");
-    } finally {
-      setMetaLoading(false);
-    }
-  }
-
   async function onUploadFile(file: File) {
     setError(null);
     setMeta(null);
-    setUrl("");
     setFileId(null);
     setUploadMeta(null);
     setTranscript(null);
@@ -271,7 +248,6 @@ function NewInner() {
     setHighlights(null);
     try {
       const t = await transcribe({
-        url: fileId ? undefined : url.trim(),
         fileId: fileId ?? undefined,
         provider,
         apiKey,
@@ -296,7 +272,6 @@ function NewInner() {
     setNarrationScript(null);
     try {
       const { script } = await generateNarrationScript({
-        url: fileId ? undefined : url.trim(),
         fileId: fileId ?? undefined,
         apiKey,
       });
@@ -433,7 +408,6 @@ function NewInner() {
     setJobStatus(null);
     try {
       const { job_id } = await startRender({
-        url: fileId ? undefined : url.trim(),
         fileId: fileId ?? undefined,
         highlights,
         transcript,
@@ -464,7 +438,16 @@ function NewInner() {
         {mode === "one-to-many" ? "1개 영상 → N개 쇼츠" : "N개 영상 → N개 쇼츠"}
       </h1>
       <p className="muted" style={{ marginBottom: 32 }}>
-        YouTube URL을 붙여넣거나, 로컬 영상 파일을 업로드하세요.
+        영상 파일을 업로드하세요. (YouTube 영상은{" "}
+        <a
+          href="https://cobalt.tools"
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: "var(--accent)", textDecoration: "underline" }}
+        >
+          cobalt.tools
+        </a>{" "}
+        등으로 mp4 다운로드 후 사용)
       </p>
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
@@ -473,43 +456,7 @@ function NewInner() {
         <label
           style={{ display: "block", fontSize: 14, marginBottom: 8, fontWeight: 600 }}
         >
-          YouTube URL
-        </label>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            className="input"
-            placeholder="https://www.youtube.com/watch?v=..."
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && onFetchMeta()}
-            disabled={uploadProgress !== null}
-          />
-          <button
-            className="btn"
-            onClick={onFetchMeta}
-            disabled={metaLoading || !url.trim() || uploadProgress !== null}
-          >
-            {metaLoading ? "조회 중..." : "확인"}
-          </button>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            margin: "16px 0",
-          }}
-        >
-          <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-          <span className="muted" style={{ fontSize: 12 }}>또는</span>
-          <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-        </div>
-
-        <label
-          style={{ display: "block", fontSize: 14, marginBottom: 8, fontWeight: 600 }}
-        >
-          로컬 영상 파일 업로드
+          영상 파일 업로드
         </label>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
@@ -521,7 +468,7 @@ function NewInner() {
               if (f) onUploadFile(f);
               e.target.value = "";
             }}
-            disabled={uploadProgress !== null || metaLoading}
+            disabled={uploadProgress !== null}
             style={{ flex: 1 }}
           />
         </div>
